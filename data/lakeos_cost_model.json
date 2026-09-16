@@ -1,11 +1,11 @@
 {
   "monthly_orders:none": 1.0,
-  "monthly_orders:month": 1.200148,
-  "monthly_orders:month_region": 1.614558,
+  "monthly_orders:month": 1.443264,
+  "monthly_orders:month_region": 1.764365,
   "regional_monthly_orders:none": 1.0,
-  "regional_monthly_orders:month": 1.233251,
-  "regional_monthly_orders:month_region": 1.601962,
+  "regional_monthly_orders:month": 1.591723,
+  "regional_monthly_orders:month_region": 1.796867,
   "revenue_by_region:none": 1.0,
-  "revenue_by_region:month": 1.128399,
-  "revenue_by_region:month_region": 1.186978
+  "revenue_by_region:month": 1.087146,
+  "revenue_by_region:month_region": 1.114555
 }

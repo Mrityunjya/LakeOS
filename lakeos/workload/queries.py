@@ -10,20 +10,24 @@ class Workload:
     description: str
     query: Callable[[pl.LazyFrame], pl.LazyFrame]
 
+    # Partition-pruning metadata.
+    # These fields describe predicates that can be evaluated
+    # against Hive-style partition directories.
+    partition_filters: dict[str, object] | None = None
+
 
 def monthly_orders(
     df: pl.LazyFrame,
 ) -> pl.LazyFrame:
-    """
-    Workload 1:
-    Count orders during a specific month.
-    """
 
     return (
         df
         .filter(
             (pl.col("order_timestamp") >= pl.datetime(2025, 6, 1))
-            & (pl.col("order_timestamp") < pl.datetime(2025, 7, 1))
+            & (
+                pl.col("order_timestamp")
+                < pl.datetime(2025, 7, 1)
+            )
         )
         .select(
             pl.len().alias("order_count")
@@ -34,17 +38,19 @@ def monthly_orders(
 def regional_monthly_orders(
     df: pl.LazyFrame,
 ) -> pl.LazyFrame:
-    """
-    Workload 2:
-    Count Chennai orders during a specific month.
-    """
 
     return (
         df
         .filter(
             (pl.col("order_timestamp") >= pl.datetime(2025, 6, 1))
-            & (pl.col("order_timestamp") < pl.datetime(2025, 7, 1))
-            & (pl.col("region") == "Chennai")
+            & (
+                pl.col("order_timestamp")
+                < pl.datetime(2025, 7, 1)
+            )
+            & (
+                pl.col("region")
+                == "Chennai"
+            )
         )
         .select(
             pl.len().alias("order_count")
@@ -55,10 +61,6 @@ def regional_monthly_orders(
 def revenue_by_region(
     df: pl.LazyFrame,
 ) -> pl.LazyFrame:
-    """
-    Workload 3:
-    Calculate total revenue by region.
-    """
 
     return (
         df
@@ -78,24 +80,27 @@ def revenue_by_region(
 WORKLOADS = [
     Workload(
         name="monthly_orders",
-        description=(
-            "Count orders for June 2025."
-        ),
+        description="Count orders for June 2025.",
         query=monthly_orders,
+        partition_filters={
+            "year": 2025,
+            "month": 6,
+        },
     ),
     Workload(
         name="regional_monthly_orders",
-        description=(
-            "Count Chennai orders for June 2025."
-        ),
+        description="Count Chennai orders for June 2025.",
         query=regional_monthly_orders,
+        partition_filters={
+            "year": 2025,
+            "month": 6,
+            "region": "Chennai",
+        },
     ),
     Workload(
         name="revenue_by_region",
-        description=(
-            "Calculate total revenue by region."
-        ),
+        description="Calculate total revenue by region.",
         query=revenue_by_region,
+        partition_filters=None,
     ),
 ]
-

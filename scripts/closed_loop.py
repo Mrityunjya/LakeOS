@@ -21,9 +21,13 @@ from lakeos.optimizer.optimization_report import (
     calculate_file_count_change,
     calculate_storage_change,
     calculate_workload_weighted_improvement,
+    calculate_pruning_prediction_error,
     build_decision_reason,
     save_report,
     print_report,
+)
+from lakeos.optimizer.what_if import (
+    estimate_partition_pruning,
 )
 from lakeos.metadata.optimization_history import (
     OptimizationObservation,
@@ -41,7 +45,9 @@ from lakeos.workload.workload_profiler import (
 )
 
 
-RAW_PATH = Path("data/sample/orders")
+RAW_PATH = Path(
+    "data/sample/orders"
+)
 
 FINAL_OUTPUT_PATH = Path(
     "data/lake/optimized/orders"
@@ -167,9 +173,14 @@ def main():
 
     predictions = {}
 
+    # Store What-If pruning predictions separately
+    # so they can later be compared with observations.
+    pruning_predictions = {}
+
     for profile in profiles:
 
         predictions[profile.name] = {}
+        pruning_predictions[profile.name] = {}
 
         print()
         print(
@@ -178,9 +189,31 @@ def main():
 
         for layout in LAYOUTS:
 
+            # -------------------------------------------------
+            # What-If pruning prediction
+            # -------------------------------------------------
+
+            pruning = estimate_partition_pruning(
+                profile,
+                layout,
+            )
+
+            predicted_pruning = float(
+                pruning["pruning_ratio"]
+            )
+
+            pruning_predictions[
+                profile.name
+            ][layout] = predicted_pruning
+
+            # -------------------------------------------------
+            # Adaptive cost prediction
+            # -------------------------------------------------
+
             cost = estimate_adaptive_cost(
                 profile,
                 layout,
+                pruning_ratio=predicted_pruning,
             )
 
             predictions[
@@ -189,7 +222,8 @@ def main():
 
             print(
                 f"  {layout:<15}"
-                f"{cost:.4f}"
+                f"cost={cost:.4f} "
+                f"pruning={predicted_pruning:.2%}"
             )
 
     # ---------------------------------------------------------
@@ -250,7 +284,8 @@ def main():
             print(
                 f"{workload.name:<28}"
                 f"median={result.median_time_seconds:.6f}s "
-                f"p95={result.p95_time_seconds:.6f}s"
+                f"p95={result.p95_time_seconds:.6f}s "
+                f"pruning={result.pruning_ratio:.2%}"
             )
 
     # ---------------------------------------------------------
@@ -406,6 +441,31 @@ def main():
                         record.error_percentage
                     ),
                 )
+            )
+
+            predicted_pruning = (
+                pruning_predictions[
+                    workload.name
+                ][layout]
+            )
+
+            observed_pruning = (
+                benchmark_result.pruning_ratio
+            )
+
+            pruning_error = (
+                calculate_pruning_prediction_error(
+                    predicted_pruning,
+                    observed_pruning,
+                )
+            )
+
+            print(
+                f"{workload.name:<28}"
+                f"{layout:<15}"
+                f"predicted_pruning={predicted_pruning:.2%} "
+                f"observed_pruning={observed_pruning:.2%} "
+                f"error={pruning_error:+.2f}%"
             )
 
     print_feedback(
@@ -580,6 +640,26 @@ def main():
             f"{result.p95_time_seconds:.6f}s"
         )
 
+        print(
+            f"Files  : "
+            f"{result.available_files}"
+        )
+
+        print(
+            f"Eligible : "
+            f"{result.eligible_files}"
+        )
+
+        print(
+            f"Pruned : "
+            f"{result.pruned_files}"
+        )
+
+        print(
+            f"Pruning : "
+            f"{result.pruning_ratio:.2%}"
+        )
+
     # ---------------------------------------------------------
     # 10. BUILD OPTIMIZATION REPORT
     # ---------------------------------------------------------
@@ -650,6 +730,23 @@ def main():
             )
         )
 
+        predicted_pruning = (
+            pruning_predictions[
+                workload.name
+            ][selected_layout]
+        )
+
+        observed_pruning = (
+            selected_result.pruning_ratio
+        )
+
+        pruning_error = (
+            calculate_pruning_prediction_error(
+                predicted_pruning,
+                observed_pruning,
+            )
+        )
+
         report_workloads.append(
             WorkloadReport(
                 workload=workload.name,
@@ -681,6 +778,15 @@ def main():
                 prediction_error_percentage=(
                     selected_feedback
                     .error_percentage
+                ),
+                predicted_pruning_ratio=(
+                    predicted_pruning
+                ),
+                observed_pruning_ratio=(
+                    observed_pruning
+                ),
+                pruning_prediction_error_percentage=(
+                    pruning_error
                 ),
             )
         )
@@ -765,4 +871,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -1,5 +1,5 @@
 {
-  "run_id": "20260916T064556004741Z",
+  "run_id": "20260916T074854926918Z",
   "selected_layout": "month",
   "candidate_layouts": [
     "none",
@@ -8,46 +8,55 @@
   ],
   "baseline_files": 1,
   "selected_files": 12,
-  "baseline_size_bytes": 21364446,
-  "selected_size_bytes": 21382761,
+  "baseline_size_bytes": 21378105,
+  "selected_size_bytes": 21361796,
   "file_count_change_percentage": 1100.0,
-  "storage_change_percentage": 0.09,
-  "workload_weighted_improvement_percentage": 41.99,
+  "storage_change_percentage": -0.08,
+  "workload_weighted_improvement_percentage": 41.85,
   "workloads": [
     {
       "workload": "monthly_orders",
       "frequency": 0.5,
-      "baseline_time_seconds": 0.011354,
-      "selected_time_seconds": 0.005315,
-      "median_improvement_percentage": 53.19,
-      "p95_improvement_percentage": 54.49,
-      "predicted_cost": 0.388,
-      "actual_relative_cost": 0.4029,
-      "prediction_error_percentage": 3.82
+      "baseline_time_seconds": 0.00846,
+      "selected_time_seconds": 0.004339,
+      "median_improvement_percentage": 48.71,
+      "p95_improvement_percentage": 49.51,
+      "predicted_cost": 0.2703,
+      "actual_relative_cost": 0.4387,
+      "prediction_error_percentage": 62.27,
+      "predicted_pruning_ratio": 0.9175,
+      "observed_pruning_ratio": 1.0,
+      "pruning_prediction_error_percentage": 8.99
     },
     {
       "workload": "regional_monthly_orders",
       "frequency": 0.35,
-      "baseline_time_seconds": 0.014155,
-      "selected_time_seconds": 0.005967,
-      "median_improvement_percentage": 57.85,
-      "p95_improvement_percentage": 55.05,
-      "predicted_cost": 0.3491,
-      "actual_relative_cost": 0.4003,
-      "prediction_error_percentage": 14.65
+      "baseline_time_seconds": 0.009246,
+      "selected_time_seconds": 0.00377,
+      "median_improvement_percentage": 59.23,
+      "p95_improvement_percentage": 59.73,
+      "predicted_cost": 0.2546,
+      "actual_relative_cost": 0.5044,
+      "prediction_error_percentage": 98.1,
+      "predicted_pruning_ratio": 0.9629,
+      "observed_pruning_ratio": 1.0,
+      "pruning_prediction_error_percentage": 3.85
     },
     {
       "workload": "revenue_by_region",
       "frequency": 0.15,
-      "baseline_time_seconds": 0.022477,
-      "selected_time_seconds": 0.029745,
-      "median_improvement_percentage": -32.34,
-      "p95_improvement_percentage": -41.23,
-      "predicted_cost": 1.0818,
-      "actual_relative_cost": 1.4065,
-      "prediction_error_percentage": 30.01
+      "baseline_time_seconds": 0.020895,
+      "selected_time_seconds": 0.025404,
+      "median_improvement_percentage": -21.58,
+      "p95_improvement_percentage": -21.08,
+      "predicted_cost": 1.077,
+      "actual_relative_cost": 1.2221,
+      "prediction_error_percentage": 13.47,
+      "predicted_pruning_ratio": 0.0,
+      "observed_pruning_ratio": 0.0,
+      "pruning_prediction_error_percentage": 0.0
     }
   ],
-  "decision_reason": "Selected layout 'month' based on workload-weighted empirical performance. The selected layout produced 41.99% weighted median latency improvement relative to the baseline.",
+  "decision_reason": "Selected layout 'month' based on workload-weighted empirical performance. The selected layout produced 41.85% weighted median latency improvement relative to the baseline.",
   "confidence": 0.5934
 }

@@ -28,6 +28,16 @@ class BenchmarkResult:
 
     total_size_bytes: int
 
+    # Partition-pruning observability.
+    #
+    # These values describe the files that are eligible
+    # according to Hive-style partition directory metadata.
+    # They are not exact engine-level physical scan metrics.
+    available_files: int
+    eligible_files: int
+    pruned_files: int
+    pruning_ratio: float
+
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -53,6 +63,122 @@ def calculate_dataset_size(
             dataset_path
         )
     )
+
+
+def analyze_partition_pruning(
+    workload: Workload,
+    dataset_path: Path,
+) -> dict[str, float | int]:
+    """
+    Estimate partition pruning using Hive-style
+    directory metadata.
+
+    Example:
+
+        year=2025/month=6/data.parquet
+
+    A workload with:
+
+        {"year": 2025, "month": 6}
+
+    will consider only matching files eligible.
+
+    Important:
+    These are logical pruning estimates based on
+    partition directories. They are not exact
+    engine-level bytes/files physically scanned.
+    """
+
+    files = find_parquet_files(
+        dataset_path
+    )
+
+    available_files = len(files)
+
+    if available_files == 0:
+        return {
+            "available_files": 0,
+            "eligible_files": 0,
+            "pruned_files": 0,
+            "pruning_ratio": 0.0,
+        }
+
+    filters = workload.partition_filters
+
+    # No partition metadata associated with
+    # the workload means no pruning can be
+    # inferred.
+    if not filters:
+        return {
+            "available_files": available_files,
+            "eligible_files": available_files,
+            "pruned_files": 0,
+            "pruning_ratio": 0.0,
+        }
+
+    eligible_files = 0
+
+    for file_path in files:
+
+        partition_values: dict[str, str] = {}
+
+        for part in file_path.parts:
+
+            if "=" not in part:
+                continue
+
+            key, value = part.split(
+                "=",
+                1,
+            )
+
+            partition_values[key] = value
+
+        matches = True
+
+        for key, expected_value in filters.items():
+
+            actual_value = (
+                partition_values.get(key)
+            )
+
+            # If the physical layout does not
+            # contain this partition key, it
+            # cannot be used for pruning.
+            #
+            # Example:
+            # month layout has year/month but
+            # does not have region.
+            if actual_value is None:
+                continue
+
+            if str(actual_value) != str(
+                expected_value
+            ):
+                matches = False
+                break
+
+        if matches:
+            eligible_files += 1
+
+    pruned_files = (
+        available_files
+        - eligible_files
+    )
+
+    pruning_ratio = (
+        pruned_files
+        / available_files
+        if available_files > 0
+        else 0.0
+    )
+
+    return {
+        "available_files": available_files,
+        "eligible_files": eligible_files,
+        "pruned_files": pruned_files,
+        "pruning_ratio": pruning_ratio,
+    }
 
 
 def calculate_p95(
@@ -97,6 +223,7 @@ def benchmark_workload(
     Performs:
     - one warmup execution
     - multiple measured trials
+    - partition-pruning analysis
 
     The median execution time is used as the primary
     benchmark measurement.
@@ -120,6 +247,19 @@ def benchmark_workload(
             f"No Parquet files found in "
             f"{dataset_path}"
         )
+
+    # --------------------------------------------------------
+    # Partition pruning analysis
+    # --------------------------------------------------------
+
+    pruning = analyze_partition_pruning(
+        workload,
+        dataset_path,
+    )
+
+    # --------------------------------------------------------
+    # Lazy query
+    # --------------------------------------------------------
 
     scan_path = str(
         dataset_path / "**" / "*.parquet"
@@ -219,6 +359,22 @@ def benchmark_workload(
         total_size_bytes=calculate_dataset_size(
             dataset_path
         ),
+
+        available_files=int(
+            pruning["available_files"]
+        ),
+
+        eligible_files=int(
+            pruning["eligible_files"]
+        ),
+
+        pruned_files=int(
+            pruning["pruned_files"]
+        ),
+
+        pruning_ratio=float(
+            pruning["pruning_ratio"]
+        ),
     )
 
 
@@ -298,6 +454,37 @@ def compare_results(
                 optimized.total_size_bytes
                 / (1024 ** 2),
                 2,
+            ),
+
+        # Partition pruning comparison.
+        "raw_available_files":
+            raw.available_files,
+
+        "raw_eligible_files":
+            raw.eligible_files,
+
+        "raw_pruned_files":
+            raw.pruned_files,
+
+        "raw_pruning_ratio":
+            round(
+                raw.pruning_ratio,
+                4,
+            ),
+
+        "optimized_available_files":
+            optimized.available_files,
+
+        "optimized_eligible_files":
+            optimized.eligible_files,
+
+        "optimized_pruned_files":
+            optimized.pruned_files,
+
+        "optimized_pruning_ratio":
+            round(
+                optimized.pruning_ratio,
+                4,
             ),
 
         "trials":
@@ -405,6 +592,16 @@ def run_benchmark(
             f"{optimized_result.file_count}"
         )
 
+        print(
+            f"PRUNING          : "
+            f"{optimized_result.eligible_files}/"
+            f"{optimized_result.available_files} "
+            f"eligible, "
+            f"{optimized_result.pruned_files} "
+            f"pruned "
+            f"({optimized_result.pruning_ratio:.2%})"
+        )
+
     print()
     print("=" * 75)
 
@@ -462,6 +659,20 @@ def print_benchmark_summary(
         print(
             f"Trials   : "
             f"{comparison['trials']}"
+        )
+
+        print(
+            f"Pruning  : "
+            f"{comparison['optimized_eligible_files']}/"
+            f"{comparison['optimized_available_files']} "
+            f"eligible"
+        )
+
+        print(
+            f"Pruned   : "
+            f"{comparison['optimized_pruned_files']} "
+            f"files "
+            f"({comparison['optimized_pruning_ratio']:.2%})"
         )
 
     print()

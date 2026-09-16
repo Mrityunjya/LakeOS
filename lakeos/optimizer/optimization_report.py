@@ -24,6 +24,11 @@ class WorkloadReport:
     actual_relative_cost: float
     prediction_error_percentage: float
 
+    # Partition-pruning observability.
+    predicted_pruning_ratio: float
+    observed_pruning_ratio: float
+    pruning_prediction_error_percentage: float
+
 
 @dataclass
 class OptimizationReport:
@@ -129,6 +134,28 @@ def calculate_workload_weighted_improvement(
     return round(
         weighted_improvement
         / total_weight,
+        2,
+    )
+
+
+def calculate_pruning_prediction_error(
+    predicted: float,
+    observed: float,
+) -> float:
+
+    if predicted <= 0:
+        return round(
+            observed * 100,
+            2,
+        )
+
+    return round(
+        (
+            observed
+            - predicted
+        )
+        / predicted
+        * 100,
         2,
     )
 
@@ -289,6 +316,21 @@ def print_report(
             f"{workload.prediction_error_percentage:+.2f}%"
         )
 
+        print(
+            f"  Predicted pruning     : "
+            f"{workload.predicted_pruning_ratio:.2%}"
+        )
+
+        print(
+            f"  Observed pruning      : "
+            f"{workload.observed_pruning_ratio:.2%}"
+        )
+
+        print(
+            f"  Pruning prediction    : "
+            f"{workload.pruning_prediction_error_percentage:+.2f}%"
+        )
+
     print()
     print("--- DECISION ---")
 
@@ -313,3 +355,4 @@ def print_report(
         f"Report saved to         : "
         f"{REPORT_PATH}"
     )
+
