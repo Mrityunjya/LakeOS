@@ -1,0 +1,18 @@
+@"
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.vscode/
+.idea/
+.env
+*.log
+
+data/raw/
+data/lake/
+data/sample/*.csv
+data/sample/*.parquet
+
+.DS_Store
+Thumbs.db
+"@ | Out-File -Encoding utf8 .gitignore
