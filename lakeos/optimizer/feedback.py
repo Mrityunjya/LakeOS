@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 
@@ -8,77 +8,94 @@ class FeedbackRecord:
     layout: str
 
     predicted_cost: float
-    actual_time_seconds: float
+    actual_relative_cost: float
 
     prediction_error: float
     error_percentage: float
 
+    actual_time_seconds: float
+
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "workload": self.workload,
-            "layout": self.layout,
-            "predicted_cost": self.predicted_cost,
-            "actual_time_seconds": self.actual_time_seconds,
-            "prediction_error": self.prediction_error,
-            "error_percentage": self.error_percentage,
-        }
+        return asdict(self)
 
 
 def create_feedback_record(
     workload: str,
     layout: str,
     predicted_cost: float,
+    baseline_time_seconds: float,
     actual_time_seconds: float,
 ) -> FeedbackRecord:
     """
-    Compare the optimizer's predicted cost with
-    the measured execution time.
+    Create feedback from an executed workload.
 
-    The values are normalized relative to the
-    workload's actual measurement.
+    Costs are normalized relative to the baseline:
+
+        1.0 = same as baseline
+        0.5 = twice as fast
+        2.0 = twice as slow
     """
 
+    if baseline_time_seconds <= 0:
+        actual_relative_cost = 1.0
+    else:
+        actual_relative_cost = (
+            actual_time_seconds
+            / baseline_time_seconds
+        )
+
     prediction_error = (
-        actual_time_seconds
+        actual_relative_cost
         - predicted_cost
     )
 
-    if actual_time_seconds > 0:
-
+    if predicted_cost != 0:
         error_percentage = (
-            abs(prediction_error)
-            / actual_time_seconds
+            prediction_error
+            / predicted_cost
             * 100
         )
-
     else:
-
         error_percentage = 0.0
 
     return FeedbackRecord(
         workload=workload,
         layout=layout,
-
         predicted_cost=round(
             predicted_cost,
-            6,
+            4,
         ),
-
-        actual_time_seconds=round(
-            actual_time_seconds,
-            6,
+        actual_relative_cost=round(
+            actual_relative_cost,
+            4,
         ),
-
         prediction_error=round(
             prediction_error,
-            6,
+            4,
         ),
-
         error_percentage=round(
             error_percentage,
             2,
         ),
+        actual_time_seconds=round(
+            actual_time_seconds,
+            6,
+        ),
     )
+
+
+def calculate_feedback_error(
+    records: list[FeedbackRecord],
+) -> float:
+    """Calculate mean absolute prediction error."""
+
+    if not records:
+        return 0.0
+
+    return sum(
+        abs(record.error_percentage)
+        for record in records
+    ) / len(records)
 
 
 def print_feedback(
@@ -87,37 +104,51 @@ def print_feedback(
 
     print()
     print("=" * 75)
-    print("LAKEOS OPTIMIZER FEEDBACK")
+    print("LAKEOS ADAPTIVE FEEDBACK")
     print("=" * 75)
 
     for record in records:
 
         print()
-
         print(
-            f"Workload : "
+            f"WORKLOAD: "
             f"{record.workload}"
         )
 
         print(
-            f"Layout   : "
+            f"LAYOUT: "
             f"{record.layout}"
         )
 
         print(
-            f"Predicted: "
-            f"{record.predicted_cost:.6f}"
+            f"Predicted cost : "
+            f"{record.predicted_cost:.4f}"
         )
 
         print(
-            f"Actual   : "
+            f"Actual cost    : "
+            f"{record.actual_relative_cost:.4f}"
+        )
+
+        print(
+            f"Prediction err.: "
+            f"{record.prediction_error:+.4f}"
+        )
+
+        print(
+            f"Error          : "
+            f"{record.error_percentage:+.2f}%"
+        )
+
+        print(
+            f"Actual time    : "
             f"{record.actual_time_seconds:.6f}s"
         )
 
-        print(
-            f"Error    : "
-            f"{record.error_percentage:.2f}%"
-        )
-
     print()
+    print(
+        f"Mean absolute error: "
+        f"{calculate_feedback_error(records):.2f}%"
+    )
+
     print("=" * 75)

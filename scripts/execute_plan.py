@@ -3,29 +3,39 @@ from pathlib import Path
 from lakeos.optimizer.execution_engine import (
     execute_optimization,
 )
-from lakeos.profiler.data_profiler import (
-    profile_dataset,
+
+
+RAW_PATH = Path(
+    "data/sample/orders"
+)
+
+OUTPUT_PATH = Path(
+    "data/lake/optimized/orders"
 )
 
 
-SOURCE_PATH = Path("data/sample/orders")
-OUTPUT_PATH = Path("data/lake/optimized/orders")
-
-
 def main():
-    print("Running LAKEOS execution engine...")
 
-    profile = profile_dataset(SOURCE_PATH)
+    layout = "month"
 
     report = execute_optimization(
-        profile,
-        OUTPUT_PATH,
+        source_path=RAW_PATH,
+        output_path=OUTPUT_PATH,
+        layout=layout,
     )
 
     print()
-    print("EXECUTION REPORT")
-    print("-" * 70)
-    print(report.to_dict())
+    print(
+        f"Final layout: "
+        f"{report.layout}"
+    )
+
+    print(
+        f"Rows: "
+        f"{report.input_rows:,}"
+        f" -> "
+        f"{report.output_rows:,}"
+    )
 
 
 if __name__ == "__main__":

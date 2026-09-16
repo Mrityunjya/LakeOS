@@ -1,0 +1,53 @@
+{
+  "run_id": "20260916T064556004741Z",
+  "selected_layout": "month",
+  "candidate_layouts": [
+    "none",
+    "month",
+    "month_region"
+  ],
+  "baseline_files": 1,
+  "selected_files": 12,
+  "baseline_size_bytes": 21364446,
+  "selected_size_bytes": 21382761,
+  "file_count_change_percentage": 1100.0,
+  "storage_change_percentage": 0.09,
+  "workload_weighted_improvement_percentage": 41.99,
+  "workloads": [
+    {
+      "workload": "monthly_orders",
+      "frequency": 0.5,
+      "baseline_time_seconds": 0.011354,
+      "selected_time_seconds": 0.005315,
+      "median_improvement_percentage": 53.19,
+      "p95_improvement_percentage": 54.49,
+      "predicted_cost": 0.388,
+      "actual_relative_cost": 0.4029,
+      "prediction_error_percentage": 3.82
+    },
+    {
+      "workload": "regional_monthly_orders",
+      "frequency": 0.35,
+      "baseline_time_seconds": 0.014155,
+      "selected_time_seconds": 0.005967,
+      "median_improvement_percentage": 57.85,
+      "p95_improvement_percentage": 55.05,
+      "predicted_cost": 0.3491,
+      "actual_relative_cost": 0.4003,
+      "prediction_error_percentage": 14.65
+    },
+    {
+      "workload": "revenue_by_region",
+      "frequency": 0.15,
+      "baseline_time_seconds": 0.022477,
+      "selected_time_seconds": 0.029745,
+      "median_improvement_percentage": -32.34,
+      "p95_improvement_percentage": -41.23,
+      "predicted_cost": 1.0818,
+      "actual_relative_cost": 1.4065,
+      "prediction_error_percentage": 30.01
+    }
+  ],
+  "decision_reason": "Selected layout 'month' based on workload-weighted empirical performance. The selected layout produced 41.99% weighted median latency improvement relative to the baseline.",
+  "confidence": 0.5934
+}

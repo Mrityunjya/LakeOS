@@ -21,11 +21,17 @@ def main():
 
     print()
     print("=" * 75)
-    print("LAKEOS WHAT-IF OPTIMIZER")
+    print("LAKEOS ADAPTIVE WHAT-IF OPTIMIZER")
     print("=" * 75)
 
     profiles = profile_workloads(
         str(RAW_PATH)
+    )
+
+    print()
+    print(
+        f"Workloads evaluated: "
+        f"{len(profiles)}"
     )
 
     for profile in profiles:
@@ -38,6 +44,11 @@ def main():
             profile,
             results,
         )
+
+    print()
+    print("=" * 75)
+    print("ADAPTIVE WHAT-IF ANALYSIS COMPLETE")
+    print("=" * 75)
 
 
 if __name__ == "__main__":

@@ -1,13 +1,7 @@
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import polars as pl
-
-from lakeos.profiler.data_profiler import (
-    DatasetProfile,
-    profile_dataset,
-)
 
 
 @dataclass
@@ -15,215 +9,492 @@ class ExecutionReport:
     source_path: str
     output_path: str
 
-    before_files: int
-    after_files: int
+    layout: str
 
-    before_rows: int
-    after_rows: int
-
-    before_size_bytes: int
-    after_size_bytes: int
+    input_rows: int
+    output_rows: int
 
     duplicates_removed: int
+
     partitions_created: int
 
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+    output_files: int
+    output_size_bytes: int
 
 
-def execute_optimization(
-    profile: DatasetProfile,
-    output_path: str | Path,
-) -> ExecutionReport:
+# ============================================================
+# FILE UTILITIES
+# ============================================================
 
-    source_path = Path(profile.dataset_path)
-    output_path = Path(output_path)
+def find_parquet_files(
+    dataset_path: Path,
+) -> list[Path]:
+    """Find Parquet files recursively."""
 
-    if output_path.exists():
-        for file in output_path.rglob("*"):
-            if file.is_file():
-                file.unlink()
-    else:
-        output_path.mkdir(parents=True)
+    return sorted(
+        dataset_path.rglob("*.parquet")
+    )
 
-    print()
-    print("=" * 70)
-    print("LAKEOS OPTIMIZATION EXECUTION")
-    print("=" * 70)
 
-    print(f"Source : {source_path}")
-    print(f"Output : {output_path}")
+def calculate_size(
+    dataset_path: Path,
+) -> int:
+    """Calculate total size of a dataset."""
 
-    # ---------------------------------------------------------
-    # 1. Read source data
-    # ---------------------------------------------------------
+    return sum(
+        file.stat().st_size
+        for file in find_parquet_files(
+            dataset_path
+        )
+    )
 
-    print()
-    print("[1/4] Reading source dataset...")
 
-    df = (
-        pl.scan_parquet(str(source_path / "*.parquet"))
+# ============================================================
+# DATA LOADING
+# ============================================================
+
+def load_dataset(
+    dataset_path: Path,
+) -> pl.DataFrame:
+    """Load all Parquet data into a DataFrame."""
+
+    files = find_parquet_files(
+        dataset_path
+    )
+
+    if not files:
+        raise ValueError(
+            f"No Parquet files found in "
+            f"{dataset_path}"
+        )
+
+    return (
+        pl.scan_parquet(
+            [
+                str(file)
+                for file in files
+            ]
+        )
         .collect()
     )
 
-    before_rows = df.height
 
-    print(f"Rows loaded: {before_rows:,}")
+# ============================================================
+# DEDUPLICATION
+# ============================================================
 
-    # ---------------------------------------------------------
-    # 2. Deduplicate
-    # ---------------------------------------------------------
+def deduplicate_dataset(
+    df: pl.DataFrame,
+) -> tuple[pl.DataFrame, int]:
+    """
+    Remove duplicate logical records using order_id.
+    """
 
-    print()
-    print("[2/4] Removing duplicate records...")
+    if "order_id" not in df.columns:
 
-    before_unique = df.select(
-        pl.col("order_id").n_unique()
-    ).item()
+        return df, 0
+
+    before = df.height
 
     df = df.unique(
         subset=["order_id"],
         keep="first",
     )
 
-    after_rows = df.height
-    duplicates_removed = before_rows - after_rows
+    removed = (
+        before
+        - df.height
+    )
+
+    return df, removed
+
+
+# ============================================================
+# LAYOUT: NONE
+# ============================================================
+
+def write_unpartitioned(
+    df: pl.DataFrame,
+    output_path: Path,
+) -> int:
+    """
+    Write a compact unpartitioned Parquet dataset.
+    """
+
+    output_path.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    output_file = (
+        output_path
+        / "data.parquet"
+    )
+
+    df.write_parquet(
+        output_file,
+        compression="zstd",
+    )
+
+    return 1
+
+
+# ============================================================
+# LAYOUT: MONTH
+# ============================================================
+
+def write_month_partitioned(
+    df: pl.DataFrame,
+    output_path: Path,
+) -> int:
+    """
+    Write data partitioned by year/month.
+    """
+
+    if "order_timestamp" not in df.columns:
+
+        raise ValueError(
+            "Month partitioning requires "
+            "'order_timestamp'."
+        )
+
+    df = (
+        df
+        .with_columns(
+            [
+                pl.col(
+                    "order_timestamp"
+                )
+                .dt.year()
+                .alias("year"),
+
+                pl.col(
+                    "order_timestamp"
+                )
+                .dt.month()
+                .alias("month"),
+            ]
+        )
+    )
+
+    partition_count = 0
+
+    for (
+        year,
+        month,
+    ), partition in df.partition_by(
+        ["year", "month"],
+        as_dict=True,
+    ).items():
+
+        partition_path = (
+            output_path
+            / f"year={year}"
+            / f"month={month:02d}"
+        )
+
+        partition_path.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        partition = partition.drop(
+            ["year", "month"]
+        )
+
+        partition.write_parquet(
+            partition_path
+            / "data.parquet",
+            compression="zstd",
+        )
+
+        partition_count += 1
+
+    return partition_count
+
+
+# ============================================================
+# LAYOUT: MONTH + REGION
+# ============================================================
+
+def write_month_region_partitioned(
+    df: pl.DataFrame,
+    output_path: Path,
+) -> int:
+    """
+    Write data partitioned by year/month/region.
+    """
+
+    required_columns = {
+        "order_timestamp",
+        "region",
+    }
+
+    missing = (
+        required_columns
+        - set(df.columns)
+    )
+
+    if missing:
+
+        raise ValueError(
+            "Month + region partitioning "
+            f"requires columns: {missing}"
+        )
+
+    df = (
+        df
+        .with_columns(
+            [
+                pl.col(
+                    "order_timestamp"
+                )
+                .dt.year()
+                .alias("year"),
+
+                pl.col(
+                    "order_timestamp"
+                )
+                .dt.month()
+                .alias("month"),
+            ]
+        )
+    )
+
+    partition_count = 0
+
+    for (
+        year,
+        month,
+        region,
+    ), partition in df.partition_by(
+        [
+            "year",
+            "month",
+            "region",
+        ],
+        as_dict=True,
+    ).items():
+
+        safe_region = str(
+            region
+        ).replace(
+            "/",
+            "_",
+        )
+
+        partition_path = (
+            output_path
+            / f"year={year}"
+            / f"month={month:02d}"
+            / f"region={safe_region}"
+        )
+
+        partition_path.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        partition = partition.drop(
+            ["year", "month"]
+        )
+
+        partition.write_parquet(
+            partition_path
+            / "data.parquet",
+            compression="zstd",
+        )
+
+        partition_count += 1
+
+    return partition_count
+
+
+# ============================================================
+# LAYOUT DISPATCH
+# ============================================================
+
+def execute_layout(
+    df: pl.DataFrame,
+    layout: str,
+    output_path: Path,
+) -> int:
+    """
+    Execute the physical layout selected by LAKEOS.
+    """
+
+    if layout == "none":
+
+        return write_unpartitioned(
+            df,
+            output_path,
+        )
+
+    if layout == "month":
+
+        return write_month_partitioned(
+            df,
+            output_path,
+        )
+
+    if layout == "month_region":
+
+        return write_month_region_partitioned(
+            df,
+            output_path,
+        )
+
+    raise ValueError(
+        f"Unsupported layout: {layout}"
+    )
+
+
+# ============================================================
+# MAIN EXECUTION
+# ============================================================
+
+def execute_optimization(
+    source_path: str | Path,
+    output_path: str | Path,
+    layout: str,
+) -> ExecutionReport:
+    """
+    Execute a workload-selected physical layout.
+    """
+
+    source_path = Path(
+        source_path
+    )
+
+    output_path = Path(
+        output_path
+    )
+
+    print()
+    print("=" * 75)
+    print("LAKEOS LAYOUT-AWARE EXECUTION")
+    print("=" * 75)
+
+    print(
+        f"Source layout : raw"
+    )
+
+    print(
+        f"Target layout : {layout}"
+    )
+
+    print(
+        f"Output path   : {output_path}"
+    )
+
+    # --------------------------------------------------------
+    # Load
+    # --------------------------------------------------------
+
+    df = load_dataset(
+        source_path
+    )
+
+    input_rows = df.height
+
+    print(
+        f"Rows loaded   : "
+        f"{input_rows:,}"
+    )
+
+    # --------------------------------------------------------
+    # Deduplicate
+    # --------------------------------------------------------
+
+    df, duplicates_removed = (
+        deduplicate_dataset(df)
+    )
 
     print(
         f"Duplicates removed: "
         f"{duplicates_removed:,}"
     )
 
-    # ---------------------------------------------------------
-    # 3. Create partition columns
-    # ---------------------------------------------------------
+    # --------------------------------------------------------
+    # Clean previous output
+    # --------------------------------------------------------
 
-    print()
-    print("[3/4] Creating time-based partitions...")
+    if output_path.exists():
 
-    df = df.with_columns(
-        [
-            pl.col("order_timestamp")
-            .dt.year()
-            .alias("year"),
+        for file in (
+            output_path.rglob("*")
+        ):
 
-            pl.col("order_timestamp")
-            .dt.month()
-            .alias("month"),
-        ]
+            if file.is_file():
+                file.unlink()
+
+    output_path.mkdir(
+        parents=True,
+        exist_ok=True,
     )
 
-    partitions = (
-        df
-        .select(["year", "month"])
-        .unique()
-        .sort(["year", "month"])
+    # --------------------------------------------------------
+    # Execute selected layout
+    # --------------------------------------------------------
+
+    partitions_created = execute_layout(
+        df,
+        layout,
+        output_path,
     )
 
-    partition_count = partitions.height
-
-    print(
-        f"Partitions created: "
-        f"{partition_count}"
-    )
-
-    # ---------------------------------------------------------
-    # 4. Write optimized Parquet files
-    # ---------------------------------------------------------
-
-    print()
-    print("[4/4] Writing optimized dataset...")
-
-    for row in partitions.iter_rows(named=True):
-
-        year = row["year"]
-        month = row["month"]
-
-        partition_df = df.filter(
-            (pl.col("year") == year)
-            & (pl.col("month") == month)
-        )
-
-        partition_dir = (
+    output_files = len(
+        find_parquet_files(
             output_path
-            / f"year={year}"
-            / f"month={month:02d}"
         )
+    )
 
-        partition_dir.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        output_file = (
-            partition_dir
-            / "data.parquet"
-        )
-
-        partition_df.drop(
-            ["year", "month"]
-        ).write_parquet(
-            output_file,
-            compression="zstd",
-        )
-
-        print(
-            f"  {year}-{month:02d} "
-            f"-> {partition_df.height:,} rows"
-        )
-
-    # ---------------------------------------------------------
-    # Calculate after metrics
-    # ---------------------------------------------------------
-
-    optimized_profile = profile_dataset(
+    output_size = calculate_size(
         output_path
     )
 
+    print(
+        f"Partitions created: "
+        f"{partitions_created:,}"
+    )
+
+    print(
+        f"Output files     : "
+        f"{output_files:,}"
+    )
+
+    print(
+        f"Output size      : "
+        f"{output_size / (1024 ** 2):.2f} MB"
+    )
+
     print()
-    print("=" * 70)
-    print("EXECUTION COMPLETE")
-    print("=" * 70)
-
-    print(
-        f"Files      : "
-        f"{profile.file_count:,} -> "
-        f"{optimized_profile.file_count:,}"
-    )
-
-    print(
-        f"Rows       : "
-        f"{profile.total_rows:,} -> "
-        f"{optimized_profile.total_rows:,}"
-    )
-
-    print(
-        f"Duplicates : "
-        f"{profile.duplicate_order_ids:,} -> "
-        f"{optimized_profile.duplicate_order_ids:,}"
-    )
-
-    print(
-        f"Size       : "
-        f"{profile.total_size_bytes / (1024 ** 2):.2f} MB -> "
-        f"{optimized_profile.total_size_bytes / (1024 ** 2):.2f} MB"
-    )
-
-    print("=" * 70)
+    print("=" * 75)
 
     return ExecutionReport(
-        source_path=str(source_path),
-        output_path=str(output_path),
+        source_path=str(
+            source_path
+        ),
 
-        before_files=profile.file_count,
-        after_files=optimized_profile.file_count,
+        output_path=str(
+            output_path
+        ),
 
-        before_rows=profile.total_rows,
-        after_rows=optimized_profile.total_rows,
+        layout=layout,
 
-        before_size_bytes=profile.total_size_bytes,
-        after_size_bytes=optimized_profile.total_size_bytes,
+        input_rows=input_rows,
 
-        duplicates_removed=duplicates_removed,
-        partitions_created=partition_count,
+        output_rows=df.height,
+
+        duplicates_removed=(
+            duplicates_removed
+        ),
+
+        partitions_created=(
+            partitions_created
+        ),
+
+        output_files=output_files,
+
+        output_size_bytes=output_size,
     )
