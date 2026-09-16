@@ -1,13 +1,12 @@
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from statistics import median
 from time import perf_counter
 from typing import Any
 
 import polars as pl
 
-from lakeos.workload.queries import (
-    Workload,
-)
+from lakeos.workload.queries import Workload
 
 
 @dataclass
@@ -16,6 +15,12 @@ class BenchmarkResult:
     dataset: str
 
     execution_time_seconds: float
+    median_time_seconds: float
+    p95_time_seconds: float
+    min_time_seconds: float
+    max_time_seconds: float
+
+    trials: int
 
     rows_returned: int
 
@@ -50,15 +55,57 @@ def calculate_dataset_size(
     )
 
 
+def calculate_p95(
+    timings: list[float],
+) -> float:
+    """
+    Calculate the empirical 95th percentile.
+
+    Uses the nearest-rank approach so that the result
+    remains simple and deterministic for small trial counts.
+    """
+
+    if not timings:
+        return 0.0
+
+    sorted_timings = sorted(timings)
+
+    index = max(
+        0,
+        int(
+            0.95 * len(sorted_timings)
+        ) - 1,
+    )
+
+    index = min(
+        index,
+        len(sorted_timings) - 1,
+    )
+
+    return sorted_timings[index]
+
+
 def benchmark_workload(
     workload: Workload,
     dataset_path: str | Path,
     dataset_name: str,
+    trials: int = 5,
 ) -> BenchmarkResult:
     """
-    Execute one workload against one dataset
-    and measure execution time.
+    Execute one workload against one dataset.
+
+    Performs:
+    - one warmup execution
+    - multiple measured trials
+
+    The median execution time is used as the primary
+    benchmark measurement.
     """
+
+    if trials < 1:
+        raise ValueError(
+            "trials must be >= 1"
+        )
 
     dataset_path = Path(
         dataset_path
@@ -86,23 +133,89 @@ def benchmark_workload(
         lazy_df
     )
 
-    start = perf_counter()
+    # --------------------------------------------------------
+    # Warmup
+    # --------------------------------------------------------
 
-    result = query.collect()
+    query.collect()
 
-    end = perf_counter()
+    # --------------------------------------------------------
+    # Measured trials
+    # --------------------------------------------------------
 
-    execution_time = end - start
+    timings: list[float] = []
+
+    result = None
+
+    for _ in range(trials):
+
+        start = perf_counter()
+
+        result = query.collect()
+
+        end = perf_counter()
+
+        timings.append(
+            end - start
+        )
+
+    # --------------------------------------------------------
+    # Statistics
+    # --------------------------------------------------------
+
+    median_time = median(
+        timings
+    )
+
+    p95_time = calculate_p95(
+        timings
+    )
+
+    min_time = min(
+        timings
+    )
+
+    max_time = max(
+        timings
+    )
 
     return BenchmarkResult(
         workload=workload.name,
         dataset=dataset_name,
+
+        # Keep this field for backward compatibility.
+        # It now represents the median.
         execution_time_seconds=round(
-            execution_time,
+            median_time,
             6,
         ),
+
+        median_time_seconds=round(
+            median_time,
+            6,
+        ),
+
+        p95_time_seconds=round(
+            p95_time,
+            6,
+        ),
+
+        min_time_seconds=round(
+            min_time,
+            6,
+        ),
+
+        max_time_seconds=round(
+            max_time,
+            6,
+        ),
+
+        trials=trials,
+
         rows_returned=result.height,
+
         file_count=len(files),
+
         total_size_bytes=calculate_dataset_size(
             dataset_path
         ),
@@ -115,21 +228,26 @@ def compare_results(
 ) -> dict[str, Any]:
     """Compare raw and optimized benchmark results."""
 
-    raw_time = raw.execution_time_seconds
+    raw_time = (
+        raw.median_time_seconds
+    )
+
     optimized_time = (
-        optimized.execution_time_seconds
+        optimized.median_time_seconds
     )
 
     if optimized_time > 0:
         speedup = (
-            raw_time / optimized_time
+            raw_time
+            / optimized_time
         )
     else:
         speedup = 0.0
 
     time_reduction = (
         (
-            raw_time - optimized_time
+            raw_time
+            - optimized_time
         )
         / raw_time
         * 100
@@ -139,28 +257,51 @@ def compare_results(
 
     return {
         "workload": raw.workload,
+
         "raw_time_seconds": raw_time,
-        "optimized_time_seconds": optimized_time,
+
+        "optimized_time_seconds":
+            optimized_time,
+
+        "raw_p95_seconds":
+            raw.p95_time_seconds,
+
+        "optimized_p95_seconds":
+            optimized.p95_time_seconds,
+
         "speedup": round(
             speedup,
             2,
         ),
-        "time_reduction_percentage": round(
-            time_reduction,
-            2,
-        ),
-        "raw_files": raw.file_count,
-        "optimized_files": optimized.file_count,
-        "raw_size_mb": round(
-            raw.total_size_bytes
-            / (1024 ** 2),
-            2,
-        ),
-        "optimized_size_mb": round(
-            optimized.total_size_bytes
-            / (1024 ** 2),
-            2,
-        ),
+
+        "time_reduction_percentage":
+            round(
+                time_reduction,
+                2,
+            ),
+
+        "raw_files":
+            raw.file_count,
+
+        "optimized_files":
+            optimized.file_count,
+
+        "raw_size_mb":
+            round(
+                raw.total_size_bytes
+                / (1024 ** 2),
+                2,
+            ),
+
+        "optimized_size_mb":
+            round(
+                optimized.total_size_bytes
+                / (1024 ** 2),
+                2,
+            ),
+
+        "trials":
+            raw.trials,
     }
 
 
@@ -168,6 +309,7 @@ def run_benchmark(
     raw_path: str | Path,
     optimized_path: str | Path,
     workloads: list[Workload],
+    trials: int = 5,
 ) -> list[dict[str, Any]]:
     """
     Run all workloads against both datasets.
@@ -179,6 +321,15 @@ def run_benchmark(
     print("=" * 75)
     print("LAKEOS WORKLOAD BENCHMARK")
     print("=" * 75)
+
+    print(
+        f"Trials per workload: "
+        f"{trials}"
+    )
+
+    print(
+        "Primary metric: median execution time"
+    )
 
     for workload in workloads:
 
@@ -199,12 +350,14 @@ def run_benchmark(
             workload,
             raw_path,
             "raw",
+            trials,
         )
 
         optimized_result = benchmark_workload(
             workload,
             optimized_path,
             "optimized",
+            trials,
         )
 
         comparison = compare_results(
@@ -217,27 +370,37 @@ def run_benchmark(
         )
 
         print(
-            f"RAW       : "
-            f"{raw_result.execution_time_seconds:.6f}s"
+            f"RAW MEDIAN       : "
+            f"{raw_result.median_time_seconds:.6f}s"
         )
 
         print(
-            f"OPTIMIZED : "
-            f"{optimized_result.execution_time_seconds:.6f}s"
+            f"OPTIMIZED MEDIAN : "
+            f"{optimized_result.median_time_seconds:.6f}s"
         )
 
         print(
-            f"SPEEDUP   : "
+            f"RAW P95          : "
+            f"{raw_result.p95_time_seconds:.6f}s"
+        )
+
+        print(
+            f"OPTIMIZED P95    : "
+            f"{optimized_result.p95_time_seconds:.6f}s"
+        )
+
+        print(
+            f"SPEEDUP          : "
             f"{comparison['speedup']:.2f}x"
         )
 
         print(
-            f"TIME RED. : "
+            f"TIME RED.        : "
             f"{comparison['time_reduction_percentage']:.2f}%"
         )
 
         print(
-            f"FILES     : "
+            f"FILES            : "
             f"{raw_result.file_count} -> "
             f"{optimized_result.file_count}"
         )
@@ -277,6 +440,16 @@ def print_benchmark_summary(
         )
 
         print(
+            f"Raw P95  : "
+            f"{comparison['raw_p95_seconds']:.6f}s"
+        )
+
+        print(
+            f"Opt P95  : "
+            f"{comparison['optimized_p95_seconds']:.6f}s"
+        )
+
+        print(
             f"Speedup  : "
             f"{comparison['speedup']:.2f}x"
         )
@@ -286,6 +459,10 @@ def print_benchmark_summary(
             f"{comparison['time_reduction_percentage']:.2f}%"
         )
 
+        print(
+            f"Trials   : "
+            f"{comparison['trials']}"
+        )
+
     print()
     print("=" * 75)
-

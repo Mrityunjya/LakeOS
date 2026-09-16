@@ -26,8 +26,15 @@ OPTIMIZED_PATH = Path(
     "data/lake/optimized/orders"
 )
 
+TRIALS = 5
+
 
 def main():
+
+    print()
+    print("=" * 75)
+    print("LAKEOS EMPIRICAL COST CALIBRATION")
+    print("=" * 75)
 
     profiles = profile_workloads(
         str(RAW_PATH)
@@ -51,9 +58,10 @@ def main():
         # ----------------------------------------------------
 
         raw_result = benchmark_workload(
-            workload,
-            RAW_PATH,
-            "raw",
+            workload=workload,
+            dataset_path=RAW_PATH,
+            dataset_name="raw",
+            trials=TRIALS,
         )
 
         # ----------------------------------------------------
@@ -61,9 +69,10 @@ def main():
         # ----------------------------------------------------
 
         optimized_result = benchmark_workload(
-            workload,
-            OPTIMIZED_PATH,
-            "optimized",
+            workload=workload,
+            dataset_path=OPTIMIZED_PATH,
+            dataset_name="optimized",
+            trials=TRIALS,
         )
 
         # ----------------------------------------------------
@@ -86,16 +95,20 @@ def main():
                 prediction.estimated_cost
             ),
             baseline_time_seconds=(
-                raw_result.execution_time_seconds
+                raw_result.median_time_seconds
             ),
             actual_time_seconds=(
-                optimized_result.execution_time_seconds
+                optimized_result.median_time_seconds
             ),
         )
 
         records.append(
             record
         )
+
+    # --------------------------------------------------------
+    # Calibration summary
+    # --------------------------------------------------------
 
     print_calibration_results(
         records
