@@ -1,0 +1,19 @@
+{
+  "datasets": {
+    "orders": {
+      "dataset_name": "orders",
+      "dataset_path": "data\\lake\\optimized\\orders",
+      "layout": "month",
+      "file_count": 12,
+      "total_rows": 1000000,
+      "total_size_bytes": 21374082,
+      "partition_columns": [
+        "month",
+        "year"
+      ],
+      "created_at": "2026-09-19T10:23:10.876775+00:00",
+      "updated_at": "2026-09-19T10:23:10.876775+00:00",
+      "last_optimization_run_id": null
+    }
+  }
+}
